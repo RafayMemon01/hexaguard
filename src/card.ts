@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { FileFacts, RepositoryIndex } from "./indexer.js";
@@ -7,6 +8,19 @@ interface ScoredFile {
   file: FileFacts;
   score: number;
 }
+
+const trustLevels = {
+  T0_SOURCE: "T0_SOURCE",
+  T1_TEST_CONFIG_SCHEMA: "T1_TEST_CONFIG_SCHEMA",
+  T2_HUMAN_POLICY: "T2_HUMAN_POLICY",
+  T3_HUMAN_NOTES: "T3_HUMAN_NOTES",
+  T4_AGENT_OBSERVATION: "T4_AGENT_OBSERVATION",
+  T5_AGENT_SUMMARY: "T5_AGENT_SUMMARY",
+  T6_EXTERNAL_TEXT: "T6_EXTERNAL_TEXT",
+  T7_UNTRUSTED: "T7_UNTRUSTED",
+} as const;
+
+type TrustLevel = (typeof trustLevels)[keyof typeof trustLevels];
 
 export class MissingIndexError extends Error {
   constructor() {
@@ -74,22 +88,24 @@ export async function generateContextCard(cwd: string, task: string): Promise<st
     `Task: ${task}`,
     "",
     "Likely relevant files:",
-    formatList(likelyFiles.map((file) => file.path)),
+    formatFileList(likelyFiles),
     "",
     "Certified current facts:",
     formatList(certifiedFacts),
     "",
     "Must verify before editing:",
-    formatList(mustVerifyFiles.map((file) => file.path)),
+    formatFileList(mustVerifyFiles),
     "",
     "Security anchors:",
-    formatList(securityAnchors.map((file) => file.path)),
+    formatFileList(securityAnchors),
     "",
-    "Behavioral hints:",
-    "- None in MVP. Behavioral memory is uncertain and must be verified against current source or tests.",
+    "Uncertain behavioral hints:",
+    `- None in MVP. Future behavioral hints are ${trustLevels.T4_AGENT_OBSERVATION}/${trustLevels.T5_AGENT_SUMMARY}: evidence only, never authority.`,
     "",
-    "Rule:",
-    "Current source code and tests override memory.",
+    "Trust rule:",
+    `- ${trustLevels.T0_SOURCE} and ${trustLevels.T1_TEST_CONFIG_SCHEMA} facts are trusted only when current files match the index.`,
+    `- ${trustLevels.T2_HUMAN_POLICY} may flag anchors, but it does not override current source or tests.`,
+    "- Current source code and tests override memory.",
   ].join("\n");
 }
 
@@ -197,12 +213,20 @@ async function buildCertifiedFacts(cwd: string, files: FileFacts[]): Promise<str
   const facts: string[] = [];
 
   for (const file of files) {
+    const trustLevel = getTrustLevel(file);
+
     try {
-      await stat(join(cwd, file.path));
-      facts.push(`${file.path} exists; indexed hash ${shortHash(file.hash)}; type ${file.type}`);
+      const content = await readFile(join(cwd, file.path));
+      const currentHash = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+
+      if (currentHash === file.hash) {
+        facts.push(`[${trustLevel}] ${file.path} exists; hash matches index (${shortHash(file.hash)}); type ${file.type}`);
+      } else {
+        facts.push(`[${trustLevel}] ${file.path} changed since the last index; run hexaguard index again`);
+      }
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
-        facts.push(`${file.path} is missing since the last index; run hexaguard index again`);
+        facts.push(`[${trustLevel}] ${file.path} is missing since the last index; run hexaguard index again`);
       } else {
         throw error;
       }
@@ -210,6 +234,42 @@ async function buildCertifiedFacts(cwd: string, files: FileFacts[]): Promise<str
   }
 
   return facts;
+}
+
+function getTrustLevel(file: FileFacts): TrustLevel {
+  if (file.path.startsWith(".hexaguard/policies/")) {
+    return trustLevels.T2_HUMAN_POLICY;
+  }
+
+  if (file.isTest || file.type === "test" || isConfigFile(file) || isSchemaFile(file)) {
+    return trustLevels.T1_TEST_CONFIG_SCHEMA;
+  }
+
+  return trustLevels.T0_SOURCE;
+}
+
+function isConfigFile(file: FileFacts): boolean {
+  const lowerPath = file.path.toLowerCase();
+  const fileName = lowerPath.split("/").at(-1) ?? "";
+
+  return (
+    file.type === "config" ||
+    fileName === "config.json" ||
+    fileName === "package.json" ||
+    fileName === "tsconfig.json" ||
+    fileName.includes(".config.")
+  );
+}
+
+function isSchemaFile(file: FileFacts): boolean {
+  const lowerPath = file.path.toLowerCase();
+
+  return (
+    lowerPath.includes("schema") ||
+    lowerPath.endsWith(".graphql") ||
+    lowerPath.endsWith(".gql") ||
+    lowerPath.endsWith(".proto")
+  );
 }
 
 function fileTypePriority(file: FileFacts): number {
@@ -252,6 +312,10 @@ function formatList(items: string[]): string {
   }
 
   return items.map((item) => `- ${item}`).join("\n");
+}
+
+function formatFileList(files: FileFacts[]): string {
+  return formatList(files.map((file) => `[${getTrustLevel(file)}] ${file.path}`));
 }
 
 function shortHash(hash: string): string {

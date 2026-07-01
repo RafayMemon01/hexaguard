@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "localDataDir": ".hexaguard/local",
+  "policies": {
+    "anchors": ".hexaguard/policies/anchors.yml"
+  }
+}

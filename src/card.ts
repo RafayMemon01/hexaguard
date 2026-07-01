@@ -9,6 +9,11 @@ interface ScoredFile {
   score: number;
 }
 
+interface CertifiedFactResult {
+  facts: string[];
+  warnings: string[];
+}
+
 const trustLevels = {
   T0_SOURCE: "T0_SOURCE",
   T1_TEST_CONFIG_SCHEMA: "T1_TEST_CONFIG_SCHEMA",
@@ -91,7 +96,8 @@ export async function generateContextCard(cwd: string, task: string): Promise<st
     formatFileList(likelyFiles),
     "",
     "Certified current facts:",
-    formatList(certifiedFacts),
+    formatList(certifiedFacts.facts),
+    ...formatValidityWarnings(certifiedFacts.warnings),
     "",
     "Must verify before editing:",
     formatFileList(mustVerifyFiles),
@@ -209,8 +215,9 @@ function selectMustVerifyFiles(
   return uniqueFiles([...likelyFiles, ...relevantTests, ...securityAnchors]).slice(0, maxMustVerifyFiles);
 }
 
-async function buildCertifiedFacts(cwd: string, files: FileFacts[]): Promise<string[]> {
+async function buildCertifiedFacts(cwd: string, files: FileFacts[]): Promise<CertifiedFactResult> {
   const facts: string[] = [];
+  const warnings: string[] = [];
 
   for (const file of files) {
     const trustLevel = getTrustLevel(file);
@@ -220,20 +227,26 @@ async function buildCertifiedFacts(cwd: string, files: FileFacts[]): Promise<str
       const currentHash = `sha256:${createHash("sha256").update(content).digest("hex")}`;
 
       if (currentHash === file.hash) {
-        facts.push(`[${trustLevel}] ${file.path} exists; hash matches index (${shortHash(file.hash)}); type ${file.type}`);
+        facts.push(`[${trustLevel}] VALID ${file.path}; current hash matches index (${shortHash(file.hash)}); type ${file.type}`);
       } else {
-        facts.push(`[${trustLevel}] ${file.path} changed since the last index; run hexaguard index again`);
+        facts.push(
+          `[${trustLevel}] STALE ${file.path}; current hash ${shortHash(currentHash)} differs from indexed hash ${shortHash(
+            file.hash,
+          )}; type ${file.type}`,
+        );
+        warnings.push(`${file.path} is stale; run hexaguard index before trusting indexed facts.`);
       }
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
-        facts.push(`[${trustLevel}] ${file.path} is missing since the last index; run hexaguard index again`);
+        facts.push(`[${trustLevel}] MISSING ${file.path}; file was present in the index but no longer exists`);
+        warnings.push(`${file.path} is missing; run hexaguard index after resolving the missing file.`);
       } else {
         throw error;
       }
     }
   }
 
-  return facts;
+  return { facts, warnings };
 }
 
 function getTrustLevel(file: FileFacts): TrustLevel {
@@ -312,6 +325,14 @@ function formatList(items: string[]): string {
   }
 
   return items.map((item) => `- ${item}`).join("\n");
+}
+
+function formatValidityWarnings(warnings: string[]): string[] {
+  if (warnings.length === 0) {
+    return [];
+  }
+
+  return ["", "Validity warnings:", formatList(warnings)];
 }
 
 function formatFileList(files: FileFacts[]): string {

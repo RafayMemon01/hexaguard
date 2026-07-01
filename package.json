@@ -1,0 +1,27 @@
+{
+  "name": "hexaguard",
+  "version": "0.1.0",
+  "description": "Validity-first context cards for AI coding agents.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "hexaguard": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.4"
+  }
+}

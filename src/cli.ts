@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { Command } from "commander";
 
+import { generateContextCard, MissingIndexError } from "./card.js";
 import { indexRepository } from "./indexer.js";
 
 const program = new Command();
@@ -113,9 +114,19 @@ program
   .command("card")
   .description("Generate a compact context card for a task.")
   .argument("<task>", "task description")
-  .action((task: string) => {
-    console.log(`hexaguard card: placeholder command for task: ${task}`);
-    console.log("Context card generation is not implemented yet.");
+  .action(async (task: string) => {
+    try {
+      console.log(await generateContextCard(process.cwd(), task));
+    } catch (error) {
+      if (error instanceof MissingIndexError) {
+        console.error(error.message);
+      } else {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`hexaguard card failed: ${message}`);
+      }
+
+      process.exitCode = 1;
+    }
   });
 
 program.parse();

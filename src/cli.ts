@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import { Command } from "commander";
 
+import { indexRepository } from "./indexer.js";
+
 const program = new Command();
 
 const configJson = {
@@ -91,8 +93,20 @@ program
 program
   .command("index")
   .description("Scan the repository and record deterministic file facts.")
-  .action(() => {
-    console.log("hexaguard index: placeholder command. Repository indexing is not implemented yet.");
+  .action(async () => {
+    try {
+      const index = await indexRepository(process.cwd());
+      const securityAnchorCount = index.files.filter((file) => file.isSecurityAnchor).length;
+      const testFileCount = index.files.filter((file) => file.isTest).length;
+
+      console.log(`Indexed ${index.files.length} files.`);
+      console.log(`Detected ${testFileCount} test files and ${securityAnchorCount} security anchors.`);
+      console.log("Wrote .hexaguard/local/index.json");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`hexaguard index failed: ${message}`);
+      process.exitCode = 1;
+    }
   });
 
 program

@@ -15,7 +15,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/cli.js"
+    "start": "node dist/cli.js",
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
     "commander": "^12.1.0"
